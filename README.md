@@ -17,3 +17,17 @@ pip install -r requirements.txt --prefer-binary
 
 ## Usage
 
+Add the folder containing `efit2desc` to your path, like 
+
+```bash
+PATH="$PATH:/path/to/efit2desc"
+```
+
+Then, from a Python process you can import the function ``convert_EFIT_to_DESC`` and use it, like
+
+```python
+from efit2desc import convert_EFIT_to_DESC
+
+gfile = "g200245.1100"
+eq, efit = convert_EFIT_to_DESC(gfile)
+```

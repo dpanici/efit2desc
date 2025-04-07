@@ -12,7 +12,7 @@ from desc.geometry import FourierRZToroidalSurface, FourierRZCurve
 from desc.grid import LinearGrid
 
 
-def get_DESC_eq_from_EFIT_geqdsk(
+def convert_EFIT_to_DESC(
     efitfile,
     current_or_iota="current",
     profile_type="power_series",
