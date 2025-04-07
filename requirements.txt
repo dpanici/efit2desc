@@ -9,5 +9,6 @@ omas
 xarray<=v2022.10.0
 fortranformat
 matplotlib<3.5.3
+tqdm
 # DESC
 desc-opt
