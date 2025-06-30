@@ -1,4 +1,3 @@
-
 from omfit_classes import omfit_eqdsk
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,6 +11,182 @@ from desc.geometry import FourierRZToroidalSurface, FourierRZCurve
 from desc.grid import LinearGrid
 
 
+def read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff=1.0):
+
+    efit = omfit_eqdsk.OMFITgeqdsk(efitfile)
+    # run the methods of the OMFITgeqdsk class to get
+    # aux and flux surface quantities for the EFIT
+    efit.addAuxQuantities()
+    efit.addFluxSurfaces(levels=list(np.linspace(0, psiN_cutoff, 129)))
+    fluxsurf = efit["fluxSurfaces"]
+    Jt = efit["AuxQuantities"]["Jt"]
+    # this is the toroidal flux enclosed by the bdry, as calc by EFIT
+    efit_Psi = efit["AuxQuantities"]["PHI"]  # [fluxsurfind]
+    # this method obtains the iota, etc on the flux surfaces
+    fluxsurf.surfAvg()
+    return efit
+
+
+def plot_eq_surfaces_against_efit(efitfile, desc_eq, levels=20):
+
+    efit = read_EFIT_and_get_fluxsurfs(efitfile, 1.0)
+    fluxsurf = efit["fluxSurfaces"]
+
+    inds = np.arange(len(fluxsurf["flux"]))[::-10]
+    efit_rho = efit["RHOVN"]
+    rho_to_plot = efit_rho[inds]
+    fig, ax = plot_surfaces(
+        desc_eq,
+        figsize=(8, 8),
+        theta=0,
+        rho_lw=3,
+        rho=rho_to_plot[np.where(rho_to_plot <= 1.0)],
+    )
+    is_labelled = False
+    for k in inds:
+        if not is_labelled:
+            plt.plot(
+                fluxsurf["flux"][k]["R"],
+                fluxsurf["flux"][k]["Z"],
+                "k--",
+                label="EFIT",
+                lw=3,
+            )
+            is_labelled = True
+        else:
+            plt.plot(
+                fluxsurf["flux"][k]["R"],
+                fluxsurf["flux"][k]["Z"],
+                "k--",
+                lw=3,
+                label="EFIT",
+            )
+    # also want to add a couple contours outside
+    plt.contour(
+        efit["AuxQuantities"]["R"],
+        efit["AuxQuantities"]["Z"],
+        efit["PSIRZ"] - np.max(efit["PSIRZ"]),
+        colors=["k"],
+        linewidths=[3],
+        linestyles=["--"],
+    )
+    # plt.colorbar()
+    plt.axis("equal")
+    plt.axis("equal")
+    # plt.scatter(Raxis, Zaxis, marker="x", label="EFIT axis", c="k")
+    # desc_axis = desc_eq.axis.compute(["R", "Z"])
+    # plt.scatter(desc_axis["R"][0], desc_axis["Z"][0], label="DESC Axis")
+    plt.legend()
+    return fig, ax
+
+
+### taken from vmeclauncher.py truncateEFIT.py by Wingen ###
+# find psi with q(psi) = m/n for all m in [n*qmin, n*qmax]
+def scan_q(q, n=3):
+    rhos = np.linspace(0, 1.0, 1000)
+    qs = q(rhos)
+    qmax = np.max(qs)
+    qmin = np.min(qs)
+    N = int(n * qmax) + 1
+
+    psia = []
+    qa = []
+
+    for m in range(int(n * qmin) + 1, N):
+        psi = bisec(lambda x: q(x) - float(m) / n, a=0, b=1)
+        # print (m, psi, q(psi))
+        psia.append(psi)
+        qa.append(q(psi))
+
+    # m = int(n * qmax) - 1
+    # qbest = (m + 0.2) / n
+    # psi = bisec(lambda x: q(x) - qbest, a=0, b=1)
+
+    return psia, qa  # , psi
+
+
+# ----------------------------------------------------------------------------------------
+# find root through bisection
+def bisec(funct, a=0, b=1.5):
+    eps = 1e-14
+
+    x = a
+    f = funct(x)
+
+    if f > 0:
+        xo = a
+        xu = b
+    else:
+        xo = b
+        xu = a
+
+    while abs(xo - xu) > eps:
+        x = (xo + xu) / 2.0
+        f = funct(x)
+        if f > 0:
+            xo = x
+        else:
+            xu = x
+
+    return x
+
+
+################################
+
+
+def plot_eq_iota_against_efit(
+    efitfile,
+    desc_eq,
+    psiN_cutoff=0.996,
+    levels=20,
+    show_rationals=False,
+    max_n=6,
+    method="cubic",
+):
+
+    efit = read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff)
+    fluxsurf = efit["fluxSurfaces"]
+    # this is the toroidal flux enclosed by the bdry, as calc by EFIT
+
+    efit_rho = efit["RHOVN"]
+    # so if one were to integrate it over chi, we would get psi_T(chi)
+
+    psi_T = integrate.cumtrapz(
+        fluxsurf["avg"]["q"],
+        abs(fluxsurf["geo"]["psi"] - np.max(fluxsurf["geo"]["psi"])),
+    )
+
+    psi_T = np.insert(psi_T, 0, 0) * 2 * np.pi * -1  # need this factor apparently
+    efit_rho = np.sqrt(abs(psi_T / np.max(abs(psi_T))))
+
+    current = integrate.cumtrapz(
+        fluxsurf["avg"]["dip/dpsi"], fluxsurf["geo"]["psi"], initial=0
+    )
+    current_shifted = current - current[0]  # make current[0]=0 for spline fit
+
+    efit_iota = 1 / fluxsurf["avg"]["q"]
+
+    fig, ax = plt.subplots(dpi=1000)
+
+    if show_rationals:
+        qprof = SplineProfile(
+            knots=abs(psi_T / np.max(abs(psi_T))),
+            values=np.abs(fluxsurf["avg"]["q"]),
+            method=method,
+        )
+        rhos = np.linspace(0, 1, 1000)
+        ax.plot(rhos, qprof(rhos), "k--", label="EFIT |q| fit", lw=3)
+        for n in range(1, max_n + 1):
+            psi, q = scan_q(qprof, n)
+            ax.scatter(psi, q, label="n = " + str(n), s=40)
+        ax.set_xlabel("psi")
+    else:
+        fig, ax = plot_1d(desc_eq, "q", label="DESC", lw=6, ax=ax)
+        ax.plot(efit_rho, fluxsurf["avg"]["q"], "k--", label="EFIT", lw=6)
+    ax.legend()
+    return fig, ax
+
+
 def convert_EFIT_to_DESC(
     efitfile,
     current_or_iota="current",
@@ -19,7 +194,7 @@ def convert_EFIT_to_DESC(
     L=24,
     M=24,
     profile_L=24,
-    psiN_cutoff = 0.99,
+    psiN_cutoff=0.99,
     solve=True,
     plot=True,
     save=True,
@@ -29,7 +204,7 @@ def convert_EFIT_to_DESC(
 
     This function:
     - Read the EFIT equilibrium information from the gfile using the ``omfit_eqdsk.OMFITgeqdsk`` class
-    - Use the ``omfit_eqdsk.OMFITgeqdsk.addAuxQuantities()`` and ``omfit_eqdsk.OMFITgeqdsk.addFluxSurfaces()`` functions to 
+    - Use the ``omfit_eqdsk.OMFITgeqdsk.addAuxQuantities()`` and ``omfit_eqdsk.OMFITgeqdsk.addFluxSurfaces()`` functions to
      populate the object with flux-surface quantities such as the flux surface geometries and the safety factor (q = 1/iota) and toroidal current density
     - Find the last-closed-flux-surface based on the passed-in desired psiN_cutoff
      and parametrize this surface with a Fourier series based off of a geometric poloidal angle
@@ -49,26 +224,26 @@ def convert_EFIT_to_DESC(
     Paramters
     ---------
 
-    efitfile: str, 
+    efitfile: str,
         Path to eqdsk file
-    current_or_iota: {"current", "iota"} 
+    current_or_iota: {"current", "iota"}
         Whether to fix the iota or current profile
-    profile_type: {"power_series", "spline"}, 
+    profile_type: {"power_series", "spline"},
         What type of Profile to use for pressure and iota/current
-    L,M : int, 
+    L,M : int,
         Radial/poloidal spectral resolution to use for DESC equilibrium
-    profile_L : int, 
+    profile_L : int,
         Radial resolution to use for the profile fits (if using a power series)
-    psiN_cutoff : int, 
+    psiN_cutoff : int,
         Which normalized poloidal flux to cut the EFIT equilibrium off at and consider as the LCFS for the DESC Equilibrium
-    solve : bool, 
+    solve : bool,
         Whether or not to solve the DESC Equilibrium before returning. if False, will return an unsolved DESC Equilibrium object,
          which will not be in equilibrium and will not have the correct interior flux surfaces.
-    plot : bool, 
+    plot : bool,
         Whether or not to create the plots showing the initial and final flux surfaces and profiles compared to EFIT.
-    save : bool, 
+    save : bool,
         Whether or not to save the Equilibrium and the plots (plots are saved only if ``plot=True``)
-    savefolder : str, 
+    savefolder : str,
         What folder to save the Equilibrium and figures to (if save=True)
 
     Returns
@@ -78,19 +253,11 @@ def convert_EFIT_to_DESC(
 
 
     """
-
-    efit = omfit_eqdsk.OMFITgeqdsk(efitfile)
-    # run the methods of the OMFITgeqdsk class to get
-    # aux and flux surface quantities for the EFIT
-    efit.addAuxQuantities()
-    efit.addFluxSurfaces(levels=list(np.linspace(0, psiN_cutoff, 129)))
-    fluxsurf = efit["fluxSurfaces"]
-    Jt = efit["AuxQuantities"]["Jt"]
-    # this is the toroidal flux enclosed by the bdry, as calc by EFIT
-    efit_Psi = efit["AuxQuantities"]["PHI"]  # [fluxsurfind]
     name = f"{current_or_iota}_{profile_type}_M_{M}_prof_L_{profile_L}_psimax_{psiN_cutoff}"  # _surfind_{fluxsurfind}"
-    # this method obtains the iota, etc on the flux surfaces
-    fluxsurf.surfAvg()
+    efit = read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff)
+    fluxsurf = efit["fluxSurfaces"]
+    # this is the toroidal flux enclosed by the bdry, as calc by EFIT
+    efit_Psi = efit["AuxQuantities"]["PHI"]
 
     # get bdry
     plt.figure()
@@ -99,7 +266,7 @@ def convert_EFIT_to_DESC(
     plt.axis("equal")
 
     # choose the LCFS as the bdry
-    #TODO: use spectral condensation (ideally when implemented in DESC) to choose a better angle
+    # TODO: use spectral condensation (ideally when implemented in DESC) to choose a better angle
     lastind = len(fluxsurf["flux"]) - 1
     Rbdry = fluxsurf["flux"][lastind]["R"]
     Zbdry = fluxsurf["flux"][lastind]["Z"]
@@ -165,7 +332,9 @@ def convert_EFIT_to_DESC(
     current_poly = PowerSeriesProfile.from_values(
         efit_rho, current, order=profile_L, sym="even"
     )
-    current_poly.params[0] = 0.0  # make current[0]=0 for poly to enforce zero on-axis net toroidal current
+    current_poly.params[0] = (
+        0.0  # make current[0]=0 for poly to enforce zero on-axis net toroidal current
+    )
 
     p = fluxsurf["avg"]["P"]
     p_spline = SplineProfile(knots=efit_rho, values=p)
@@ -217,10 +386,10 @@ def convert_EFIT_to_DESC(
         eq.save(savefolder + "/" + f"DESC_eq_{efitfile}_{name}.h5")
 
     if plot:
-        plot_1d(eq,"iota", label="DESC")
+        plot_1d(eq, "iota", label="DESC")
         plt.plot(efit_rho, efit_iota, "--", label="EFIT")
         plt.legend()
-        if save:    
+        if save:
             plt.savefig(savefolder + "/" + f"iota_comp_{efitfile}_{name}.png")
 
         plot_1d(eq, "current")
@@ -245,7 +414,9 @@ def convert_EFIT_to_DESC(
                 )
                 is_labelled = True
             else:
-                plt.plot(fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"], "k--", lw=3)
+                plt.plot(
+                    fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"], "k--", lw=3
+                )
 
         plt.axis("equal")
         plt.scatter(Raxis, Zaxis, marker="x", label="EFIT axis", c="k")
@@ -253,13 +424,8 @@ def convert_EFIT_to_DESC(
         plt.scatter(desc_axis["R"][0], desc_axis["Z"][0], label="DESC Axis")
         plt.legend()
         if save:
-            plt.savefig(savefolder + "/" + f"final_surfs_and_bdry_{efitfile}_{name}.png")
+            plt.savefig(
+                savefolder + "/" + f"final_surfs_and_bdry_{efitfile}_{name}.png"
+            )
 
     return eq, efit
-
-            
-            
-            
-            
-            
-            

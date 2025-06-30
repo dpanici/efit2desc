@@ -1,1 +1,1 @@
-from efit2desc import convert_EFIT_to_DESC
+from efit2desc import convert_EFIT_to_DESC, plot_eq_surfaces_against_efit, read_EFIT_and_get_fluxsurfs, plot_eq_iota_against_efit
