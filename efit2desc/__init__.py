@@ -1,1 +1,3 @@
 from efit2desc import convert_EFIT_to_DESC
+from compare_to_diag_signals import compute_Bp_probe_signals_from_DESC
+from get_coilset_for_shot import get_coilset_for_shot

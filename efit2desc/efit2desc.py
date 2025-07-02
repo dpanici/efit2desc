@@ -11,6 +11,9 @@ from desc.objectives import ForceBalance, ObjectiveFunction
 from desc.geometry import FourierRZToroidalSurface, FourierRZCurve
 from desc.grid import LinearGrid
 
+#FIXME: these should be in init!!
+from compare_to_diag_signals import compute_Bp_probe_signals_from_DESC
+from get_coilset_for_shot import get_coilset_for_shot
 
 def convert_EFIT_to_DESC(
     efitfile,
@@ -199,9 +202,8 @@ def convert_EFIT_to_DESC(
         sym=False,
         Psi=efit_Psi,
         M=M,
-        L=np.max([p_poly.basis.L, L]),
+        L=L,
     )
-
     if solve:
         eq.solve(
             ftol=1e-12,
