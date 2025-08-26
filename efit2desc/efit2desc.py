@@ -10,9 +10,6 @@ from desc.objectives import ForceBalance, ObjectiveFunction
 from desc.geometry import FourierRZToroidalSurface, FourierRZCurve
 from desc.grid import LinearGrid
 
-#FIXME: these should be in init!!
-from compare_to_diag_signals import compute_Bp_probe_signals_from_DESC
-from get_coilset_for_shot import get_coilset_for_shot
 
 def read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff=1.0):
 

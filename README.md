@@ -7,13 +7,35 @@ In order to use the scripts in this repo, one must have DESC installed and `omfi
 
 ```bash
 # first create your environment, using conda here as an example
-conda create --name efit2desc 'python>=3.9, <=3.12'
+conda create --name efit2desc python=3.9
 # activate the environemnt
 conda activate efit2desc
 # install the requirements
 # the --prefer-binary flag was found to be necessary when installing on a mac
 pip install -r requirements.txt --prefer-binary
 ```
+
+
+### Installation Requirements for accessing PTDATA
+
+For the coil and free-boundary functions in this repo, one must also have the ability to fetch data from PTDATA. The way it is done here involves using the ``PtDataFetcher`` class. To be able to use this, one must do the following (these are the steps followed at least on the Omega cluster.)
+
+Make sure you have ``d3lib`` directory in your home directory (#TODO where does this come from?)
+
+Then
+
+```bash
+
+mamba create --name efit2desc python=3.9 -y
+# go to efit2desc directory
+pip install -r requirements.txt --prefer-binary
+# then navigate to inside d3lib directory
+# make sure numpy<=1.26.4 in the environment.yml so it does not ruin the environment
+mamba env update --name efit2desc --file environment.yml
+pip install . # -e does not seem to work
+
+```
+
 
 ## Usage
 
