@@ -28,9 +28,7 @@ PCS_SYS_D3 = ":/fusion/projects/codes/pcs/data/ptdata:/fusion/projects/codes/pcs
 
 
 def compute_Bp_probe_signals_from_DESC(
-    coilset,
-    coil_grid=None,
-    eq=None,
+    coilset, coil_grid=None, eq=None, coords=None, angles=None, names=None
 ):
     """Given a DESC coilset and optionally an Equilibrium, compute Bp probe signals
 
@@ -42,6 +40,15 @@ def compute_Bp_probe_signals_from_DESC(
         _description_, by default None
     eq : Equilibrium, optional
         _description_, by default None
+    coords : (n,3) array
+        locations of the probes in R,phi,Z coordinates. If None, defaults to the
+        locations stored in source code
+    angles : (n,) array
+        angles of the probes in the R,Z plane w.r.t the horizontal axis. If None, defaults to the
+        angles stored in source code
+    names : length-n list
+        names of magnetic probes corresponding to the passed-in coords and angles.
+
 
     Returns
     -------
@@ -59,20 +66,34 @@ def compute_Bp_probe_signals_from_DESC(
     ## and their directions
     # TODO: store these not in a csv or move the csv into efit2desc and in the init, have this
     #    csv be read and the data stored as a dataframe that I can just import from the module
-    data = pd.read_csv("d3d_coils_pickup_coils_only.csv", sep=",")
-    data.dropna(inplace=True, subset=["Name"])  # removes all rows with any NaN in them
-    ptnames_Bp_probes = data["Name"].values
-    # need to make "coords" array
-    coords_Bp_probes = np.vstack(
-        [data["R"].values, data["phi"].values, data["Z"].values]
-    ).T
-
-    dir_phis_Bp_probes = np.zeros_like(data["gam"].values)
-    dir_Rs_Bp_probes = np.cos(data["gam"].values / 180 * np.pi)
-    dir_Zs_Bp_probes = np.sin(data["gam"].values / 180 * np.pi)
-    directions_Bp_probes = np.vstack(
-        [dir_Rs_Bp_probes, dir_phis_Bp_probes, dir_Zs_Bp_probes]
-    ).T
+    # TODO: assert that if any of names, coords, angles is not None, then they all must be passed in
+    if names is None:
+        data = pd.read_csv("d3d_coils_pickup_coils_only.csv", sep=",")
+        data.dropna(
+            inplace=True, subset=["Name"]
+        )  # removes all rows with any NaN in them
+        ptnames_Bp_probes = data["Name"].values
+        # need to make "coords" array
+        coords_Bp_probes = np.vstack(
+            [data["R"].values, data["phi"].values, data["Z"].values]
+        ).T
+        dir_phis_Bp_probes = np.zeros_like(data["gam"].values)
+        dir_Rs_Bp_probes = np.cos(data["gam"].values / 180 * np.pi)
+        dir_Zs_Bp_probes = np.sin(data["gam"].values / 180 * np.pi)
+        directions_Bp_probes = np.vstack(
+            [dir_Rs_Bp_probes, dir_phis_Bp_probes, dir_Zs_Bp_probes]
+        ).T
+    else:
+        data = {}
+        ptnames_Bp_probes = names
+        coords_Bp_probes = coords
+        data["gam"] = np.atleast_1d(angles)  # check this is right
+        dir_phis_Bp_probes = np.zeros_like(data["gam"])
+        dir_Rs_Bp_probes = np.cos(data["gam"] / 180 * np.pi)
+        dir_Zs_Bp_probes = np.sin(data["gam"] / 180 * np.pi)
+        directions_Bp_probes = np.vstack(
+            [dir_Rs_Bp_probes, dir_phis_Bp_probes, dir_Zs_Bp_probes]
+        ).T
 
     # compute coil contribution to diagnostic probe response
     Bp_probe_data = {}
@@ -102,6 +123,117 @@ def compute_Bp_probe_signals_from_DESC(
     ):
         Bp_probe_data[name] = measurement
     return coil_B_aligned_with_directions_Bp_probes, Bp_probe_data
+
+
+def compute_flux_loop_signals_from_DESC(
+    coilset, coil_grid=None, flux_loop_grid=None, eq=None, coords=None, names=None
+):
+    """Given a DESC coilset and optionally an Equilibrium, compute flux loop signals
+
+    Parameters
+    ----------
+    coilset : CoilSet
+        _description_
+    coil_grid : Grid, optional
+        Grid to discretize coil filaments for biot-savart law
+    coil_grid : Grid, optional
+        Grid to discretize the flux loops with for computation of the
+        flux through them via the A.dl loop integral
+
+    eq : Equilibrium, optional
+        _description_, by default None
+    coords : (n,2) array
+        locations of the flux loops in R,Z coordinates. If None, defaults to the
+        locations stored in source code
+    names : length-n list
+        names of the flux loops corresponding to the passed-in coords.
+
+
+    Returns
+    -------
+    flux_loop_signals : array
+        array of the signal computed at each flux loop.
+
+    flux_loop_data : dict
+        Dictionary of the flux loop ptnames, and the corresponding signal computed
+        from DESC. This signal is comprised of both the response to the coil field
+        and (if eq was passed in), the plasma-generated field, as computed by the
+        virtual casing principle.
+
+    """
+    ## read in the .csv to get the positions of the poloidal probes
+    ## and their directions
+    # TODO: store these not in a csv or move the csv into efit2desc and in the init, have this
+    #    csv be read and the data stored as a dataframe that I can just import from the module
+    # TODO: assert that if any of names, coords, angles is not None, then they all must be passed in
+    if names is None:
+        raise NotImplementedError("No Default flux loop coordinates yet")
+    else:
+        data = {}
+        ptnames_flux_loops = names
+        coords_flux_loops = np.atleast_2d(coords)
+
+    flux_loops = CoilSet(
+        [
+            FourierRZCoil(current=0.0, R_n=r, Z_n=z, sym=False)
+            for r, z in coords_flux_loops
+        ],
+        check_intersection=False,
+    )
+    # compute coil contribution to diagnostic probe response
+    flux_loop_data = {}
+
+    # compute plasma contribution (optionally)
+    if eq is not None:
+        # FIXME: fill this in
+        assert isinstance(eq, Equilibrium)
+        from desc.objectives._reconstruction import FluxLoop
+
+        obj = FluxLoop(
+            eq,
+            coilset,
+            flux_loops,
+            flux_loop_grid=flux_loop_grid,
+            field_grid=coil_grid,
+            coils_fixed=True,
+        )
+        obj.build()
+        flux_loop_signals = obj.compute(eq.params_dict)
+    else:
+        try:
+            from desc.objectives._reconstruction import FluxLoop
+
+            obj = FluxLoop(
+                Equilibrium(),
+                coilset,
+                flux_loops,
+                flux_loop_grid=flux_loop_grid,
+                field_grid=coil_grid,
+                coils_fixed=True,
+                vacuum=True,
+            )
+            obj.build()
+            flux_loop_signals = obj.compute(eq.params_dict)
+        except Exception as e:
+            print(e)
+            # do integral manually
+            flux_loop_signals = []
+            flux_loops_pos_data = flux_loops.compute(["x", "x_s"], grid=flux_loop_grid)
+            A = coilset.compute_magnetic_vector_potential(
+                np.vstack([d["x"] for d in flux_loops_pos_data]), source_grid=coil_grid
+            )
+            for i in range(len(flux_loops)):
+                print(i)
+                this_A = A[
+                    i * flux_loop_grid.num_nodes : (i + 1) * flux_loop_grid.num_nodes
+                ]
+                A_dot_dxds = np.sum(this_A * flux_loops_pos_data[i]["x_s"], axis=1)
+                Psi = np.sum(flux_loop_grid.spacing[:, 2] * A_dot_dxds)
+                flux_loop_signals.append(Psi)
+            flux_loop_signals = np.asarray(flux_loop_signals)
+    for name, measurement in zip(ptnames_flux_loops, flux_loop_signals):
+        flux_loop_data[name] = measurement
+    return flux_loop_signals, flux_loop_data
 
 
 def compare_to_ptdata_diags_Bp_probes(
