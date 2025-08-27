@@ -8,6 +8,7 @@ from desc.io import load
 import io
 import jax
 import matplotlib.pyplot as plt
+import warnings
 
 ### Get coil currents from ptdata ###
 try:
@@ -25,6 +26,7 @@ def get_coilset_for_shot(
     use_mgrid_instead_of_coilset=False,
     mgrid_interp_method="linear",
     use_TF_for_Bcoil=False,
+    base_coils_file=None,
 ):
     """_summary_
 
@@ -193,16 +195,7 @@ def get_coilset_for_shot(
         update_IL_coils(t, total_coils, interpolable_ptnames)
 
     # coilsfile I got from Andreas Wingen
-    coilset_name = "coils.d3d_efbic_kp48_from_andreas"
-
-    # I rename his C coils as he has it setup so
-    # 79 and 259 are in the same group
-    # 139 and 319
-    # 199 and 19
-    # but we want to have them named acc. to what they individually are
-    full_nominal_coils[33][1].name = "34 CCoil259"
-    full_nominal_coils[34][1].name = "35 CCoil319"
-    full_nominal_coils[35][1].name = "36 CCoil19"
+    coilset_name = base_coils_file  # "coils.d3d_efbic_kp48_from_andreas"
 
     # get interp1d representations of the currents
     interpolable_ptnames = {}
@@ -224,9 +217,30 @@ def get_coilset_for_shot(
         R0=1, B0=mu_0 * interpolable_ptnames["BCOIL"](time) * 144 / 2 / np.pi
     )
     if not use_mgrid_instead_of_coilset:
+        if base_coils_file is None:
+            base_coils_file = "coils.d3d_efbic_kp48_from_andreas"
+            rename_coils = True
+        else:
+            rename_coils = False
+            warnings.warn(
+                "Make sure the coilset you load has the correct coil names", UserWarning
+            )
+
+        coilset_name = base_coils_file
         full_nominal_coils = MixedCoilSet.from_makegrid_coilfile(
             coilset_name, check_intersection=False, method="linear"
         )
+
+        if rename_coils:
+            # I rename his C coils as he has it setup so
+            # 79 and 259 are in the same group
+            # 139 and 319
+            # 199 and 19
+            # but we want to have them named acc. to what they individually are
+            full_nominal_coils[33][1].name = "34 CCoil259"
+            full_nominal_coils[34][1].name = "35 CCoil319"
+            full_nominal_coils[35][1].name = "36 CCoil19"
+
         update_all_coil_currents(
             time, full_nominal_coils, interpolable_ptnames, use_TF_for_Bcoil
         )

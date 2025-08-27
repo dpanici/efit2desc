@@ -22,7 +22,7 @@ except Exception as e:
     print("could not import ptdata, got exception")
     print(e)
 from matplotlib.backends.backend_pdf import PdfPages
-from get_coilset_for_shot import get_coilset_for_shot
+from .get_coilset_for_shot import get_coilset_for_shot
 
 PCS_SYS_D3 = ":/fusion/projects/codes/pcs/data/ptdata:/fusion/projects/codes/pcs/data/ptdata/uncomp:"
 
@@ -449,7 +449,7 @@ def compare_to_ptdata_diags_Bp_probes(
         pdf_page.savefig(plt.gcf())
 
         pdf_page.close()
-    return
+    return Bps_measured, probe_names_minus_bad_names
 
 
 def compare_to_ptdata_diags_Br_probes(
