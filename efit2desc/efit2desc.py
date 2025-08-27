@@ -206,6 +206,7 @@ def convert_EFIT_to_DESC(
     plot=True,
     save=True,
     savefolder=".",
+    poloidal_angle="polar",
 ):
     """Read the EFIT file and generate a solved DESC equilibrium, as well as return the OMFITgeqdsk class object.
 
@@ -252,6 +253,9 @@ def convert_EFIT_to_DESC(
         Whether or not to save the Equilibrium and the plots (plots are saved only if ``plot=True``)
     savefolder : str,
         What folder to save the Equilibrium and figures to (if save=True)
+    poloidal angle : {"arclength", "polar"}
+        which poloidal angle to use when fitting the LCFS in DESC from EFIT.
+        Defaults to polar
 
     Returns
     -------
@@ -260,6 +264,10 @@ def convert_EFIT_to_DESC(
 
 
     """
+    assert poloidal_angle in [
+        "arclength",
+        "polar",
+    ], "poloidal_angle must be one of polar or arclength"
     name = f"{current_or_iota}_{profile_type}_M_{M}_prof_L_{profile_L}_psimax_{psiN_cutoff}"  # _surfind_{fluxsurfind}"
     efit = read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff)
     fluxsurf = efit["fluxSurfaces"]
@@ -304,7 +312,21 @@ def convert_EFIT_to_DESC(
     Zaxis = np.mean(fluxsurf["flux"][0]["Z"])
     x1 = Zbdry - Zaxis
     x2 = Rbdry - Raxis
-    thetas = np.arctan2(x1, x2)
+    # use arclength as the angle
+    if poloidal_angle == "arclength":
+        arclengths = np.sqrt(
+            (Rbdry[1:] - Rbdry[0:-1]) ** 2 + (Zbdry[1:] - Zbdry[0:-1]) ** 2
+        )
+        arclengths = np.append(
+            arclengths, (Rbdry[0] - Rbdry[-1]) ** 2 + (Zbdry[0] - Zbdry[-1]) ** 2
+        )
+        theta_norm_arclength = integrate.cumulative_trapezoid(y=arclengths, initial=0)
+        theta_norm_arclength = (
+            theta_norm_arclength / np.max(theta_norm_arclength) * 2 * np.pi
+        )
+        thetas = theta_norm_arclength
+    elif poloidal_angle == "polar":
+        thetas = np.arctan2(x1, x2)
 
     surface = FourierRZToroidalSurface.from_values(
         coords=np.vstack([Rbdry, np.zeros_like(Rbdry), Zbdry]).T,
@@ -392,14 +414,14 @@ def convert_EFIT_to_DESC(
         eq.save(savefolder + "/" + f"DESC_eq_{efitfile}_{name}.h5")
 
     if plot:
-        plot_1d(eq, "iota", label="DESC")
-        plt.plot(efit_rho, efit_iota, "--", label="EFIT")
+        plot_1d(eq, "iota", label="DESC", lw=3)
+        plt.plot(efit_rho, efit_iota, "r--", label="EFIT", lw=3)
         plt.legend()
         if save:
             plt.savefig(savefolder + "/" + f"iota_comp_{efitfile}_{name}.png")
 
-        plot_1d(eq, "current")
-        plt.plot(efit_rho, current, "--", label="EFIT")
+        plot_1d(eq, "current", label="DESC", lw=3)
+        plt.plot(efit_rho, current, "r--", label="EFIT")
         plt.legend()
         if save:
             plt.savefig(savefolder + "/" + f"current_comp_{efitfile}_{name}.png")
@@ -432,6 +454,13 @@ def convert_EFIT_to_DESC(
         if save:
             plt.savefig(
                 savefolder + "/" + f"final_surfs_and_bdry_{efitfile}_{name}.png"
+            )
+        plot_surfaces(eq, figsize=(8, 8), rho_lw=3, rho=rho_to_plot)
+        if save:
+            plt.savefig(
+                savefolder
+                + "/"
+                + f"final_surfs_with_sfl_theta_and_bdry_{efitfile}_{name}.png"
             )
 
     return eq, efit
