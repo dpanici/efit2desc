@@ -400,7 +400,7 @@ def convert_EFIT_to_DESC(
             verbose=3,
             xtol=0,
             objective=ObjectiveFunction(
-                ForceBalance(eq, grid=QuadratureGrid(L=eq.L_grid, M=eq.M, N=0))
+                ForceBalance(eq, grid=QuadratureGrid(L=eq.L_grid, M=eq.M_grid, N=0))
             ),
         )
     if save:
@@ -412,9 +412,14 @@ def convert_EFIT_to_DESC(
         plt.legend()
         if save:
             plt.savefig(savefolder + "/" + f"iota_comp_{efitfile}_{name}.png")
+        plot_1d(eq, "p", label="DESC", lw=3)
+        plt.plot(efit_rho, p, "r--", label="EFIT", lw=3)
+        plt.legend()
+        if save:
+            plt.savefig(savefolder + "/" + f"pressure_comp_{efitfile}_{name}.png")
 
         plot_1d(eq, "current", label="DESC", lw=3)
-        plt.plot(efit_rho, current, "r--", label="EFIT")
+        plt.plot(efit_rho, current, "r--", label="EFIT", lw=3)
         plt.legend()
         if save:
             plt.savefig(savefolder + "/" + f"current_comp_{efitfile}_{name}.png")
