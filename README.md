@@ -15,6 +15,8 @@ conda activate efit2desc
 pip install -r requirements.txt --prefer-binary
 ```
 
+# Warnings
+- because of limitations of the packages used from omfit, I have to use python 3.9. That limits the corresponding DESC version I can use to only v0.13.0, which is quite old. Would be great if I could use omfit-classes without dealing with those constraints, perhaps in the future I will take just the code I need from omfit-classes and put in this repo and update so that I can use newer packages, but for now be aware of this. 
 
 ### Installation Requirements for accessing PTDATA
 
