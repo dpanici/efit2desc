@@ -4,7 +4,7 @@ from .efit2desc import (
     read_EFIT_and_get_fluxsurfs,
     plot_eq_iota_against_efit,
 )
-from compare_to_diag_signals import (
+from .compare_to_diag_signals import (
     compute_Bp_probe_signals_from_DESC,
     compute_flux_loop_signals_from_DESC,
 )
