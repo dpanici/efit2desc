@@ -5,7 +5,7 @@ from .efit2desc import (
     plot_eq_iota_against_efit,
     compute_betap_li_shaf_integrals
 )
-from compare_to_diag_signals import (
+from .compare_to_diag_signals import (
     compute_Bp_probe_signals_from_DESC,
     compute_flux_loop_signals_from_DESC,
 )
