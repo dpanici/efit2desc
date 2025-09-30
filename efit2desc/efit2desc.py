@@ -462,3 +462,108 @@ def convert_EFIT_to_DESC(
             )
 
     return eq, efit
+
+from scipy.constants import mu_0
+def compute_betap_li_shaf_integrals(eq):
+    """Given a DESC eq, compute some common volumetrics.
+
+        NOTE: mainly follows the definitions given in 
+        Hirshman 1993, which are relations valid for both
+        tokamaks and stellarators.
+        These have been ~verified against VMEC (at least li, s1,s2,s3 and betai),
+        but not yet against EFIT (S integrals especially are very different than s in
+        EFIT trees...)
+
+    Parameters
+    ----------
+    eq : Equilibrium, DESC eq object
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    
+    vol_grid = QuadratureGrid(L=eq.L_grid, M=eq.M_grid, N=eq.N,NFP=eq.NFP)
+    vol_data = eq.compute(["p","B_theta","sqrt(g)","B_R","B_Z","V","B_phi","R","<beta_pol>_vol"],grid=vol_grid)
+    
+    lcfs_grid = LinearGrid(rho=1.0, M=eq.M_grid, N=eq.N,NFP=eq.NFP,sym=False)
+    lcfs_data = eq.compute(["p","B_theta","sqrt(g)","B_R","B_Z","V","R0","|e_theta x e_zeta|","S","A","G","a","current"],grid=lcfs_grid)
+    
+    def vol_int(q):#, grid,vol_data):
+        return np.sum(vol_grid.weights * q * vol_data["sqrt(g)"])
+        # return np.sum(grid.weights * q )
+        
+    def lcfs_int(q):#,grid, lcfs_data): # <q>_V from Hirshman 1993 paper def eq 8
+        return np.sum(lcfs_grid.weights * q * lcfs_data["|e_theta x e_zeta|"]) * lcfs_data["V"]/lcfs_data["S"]
+        # return np.sum(grid.weights * q ) * lcfs_data["R0"] * 2 * np.pi
+        # return np.sum(grid.weights * q ) * lcfs_data["V"]/lcfs_data["A"]
+        
+    
+    Bsq_P_lcfs = lcfs_data["B_R"]**2 + lcfs_data["B_Z"]**2
+    Bsq_P_vol = vol_data["B_R"]**2 + vol_data["B_Z"]**2
+    
+    I_TF = lcfs_data["G"][-1] / mu_0 * 2 * np.pi
+    B_T_bracket = mu_0 * I_TF / 2 / np.pi / lcfs_data["R0"]
+    B_T_hat_sq_vol = vol_data["B_phi"]**2 - B_T_bracket**2
+    
+    B_P_v = lcfs_int(Bsq_P_lcfs)
+    
+    musubi = -vol_int(B_T_hat_sq_vol) / B_P_v
+    
+    
+    lsubi = vol_int(Bsq_P_vol) / B_P_v # internal inductance li eqn 9c
+    lsubR = vol_int(vol_data["B_R"]**2) / B_P_v # eq 9d
+    lsubZ = vol_int(vol_data["B_Z"]**2) / B_P_v # eq 9d
+    
+    betai = 2*mu_0 * vol_int(vol_data["p"]) / B_P_v # poloidal beta, Hirshman eq 91
+
+    print(f"s3 = {0.5*(betai-lsubi-musubi+2*lsubR)}") # #S3/2, eq 14c
+    print(f"{lsubi=}")
+    L_i =  vol_int(Bsq_P_vol) / mu_0/ lcfs_data["current"][-1]**2
+    lsubi_current_normalized = 2*L_i / mu_0 /lcfs_data["R0"] # fro fusion wiki 
+    print(f"{lsubi_current_normalized=}")
+    print(f"{musubi=}")
+    print(f"{betai=}")
+    
+    # following Hirhsman 1993
+    A = betai + lsubi + musubi # eq 11a
+    B = betai+lsubi-musubi-lsubR*2 # eq 11b
+    C = betai-lsubi-musubi+2*lsubR # eq11c
+    
+    # these assume alphabar/R = 1, alphabar_R = 1, betabar_Z = 1, see eq 14 and below of Hisrhman 1993
+    sig_hat_R = A+B # eq 10a alpha=R
+    sig_hat_Z = C # eq10b alpha=Z
+    one_over_RT = vol_int(1/vol_data["R"]*vol_data["p"])/vol_int(vol_data["p"])# eq 12, pressure-weighted R
+    sig_hat_R_alpha_1 = A *one_over_RT # eq 10a but with alpha=1
+    
+    def S1(R_star): # eq 14a
+        return sig_hat_R+sig_hat_Z-R_star*sig_hat_R_alpha_1 # this last one should be assuming alpha=1...
+    def S2(R_star): # eq 14b
+        return R_star*sig_hat_R_alpha_1 # this last one should be assuming alpha=1...
+    S3 = C # = sig_hat_Z(Z) eq 14c
+    
+    Rgeo = lcfs_data["R0"]
+    Rlao=lcfs_data["V"]/2/np.pi/lcfs_data["A"]
+    Rshaf=1/one_over_RT
+    
+    fgeo = Rshaf/Rgeo
+    flao=Rshaf/Rlao
+    
+    # shafranov integrals for different choices of Rstar
+    # for some reason, hirshman multiplies the RG and RL by fgeo=Rshaf/Rgeo and flao=Rshaf/Rgeo... dont ask me why
+    s1 = S1(Rlao)/2/flao
+    s2 = S2(Rlao)/2/flao
+    s3 = S3/2
+    print(f's1 = S1/2 = {S1(1/one_over_RT)/2}  (RT) , {S1(Rgeo)/2/fgeo}  (RG?)  {S1(Rlao)/2/flao}  (RL)')
+    print(f's2 = S2/2 = {S2(1/one_over_RT)/2}  (RT) , {S2(Rgeo)/2/fgeo} (RG?)  {S2(Rlao)/2/flao} (RL)')
+
+
+    
+    return {"betai":betai,
+            "<beta_pol>_vol":vol_data["<beta_pol>_vol"],
+            "li": lsubi,
+            "s1": s1,
+            "s2":s2,
+            "s3":s3}
+            
