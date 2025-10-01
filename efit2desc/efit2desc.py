@@ -464,7 +464,7 @@ def convert_EFIT_to_DESC(
     return eq, efit
 
 from scipy.constants import mu_0
-def compute_betap_li_shaf_integrals(eq):
+def compute_betap_li_shaf_integrals(eq,efit=None):
     """Given a DESC eq, compute some common volumetrics.
 
         NOTE: mainly follows the definitions given in 
@@ -477,6 +477,7 @@ def compute_betap_li_shaf_integrals(eq):
     Parameters
     ----------
     eq : Equilibrium, DESC eq object
+    efit : EFIT OMFITclasses dict, if provided, will print li etc from EFIT as well
 
     Returns
     -------
@@ -488,7 +489,7 @@ def compute_betap_li_shaf_integrals(eq):
     vol_data = eq.compute(["p","B_theta","sqrt(g)","B_R","B_Z","V","B_phi","R","<beta_pol>_vol"],grid=vol_grid)
     
     lcfs_grid = LinearGrid(rho=1.0, M=eq.M_grid, N=eq.N,NFP=eq.NFP,sym=False)
-    lcfs_data = eq.compute(["p","B_theta","sqrt(g)","B_R","B_Z","V","R0","|e_theta x e_zeta|","S","A","G","a","current"],grid=lcfs_grid)
+    lcfs_data = eq.compute(["p","B_theta","sqrt(g)","B_R","B_Z","V","R0","|e_theta x e_zeta|","S","A","G","a","current","perimeter(z)"],grid=lcfs_grid)
     
     def vol_int(q):#, grid,vol_data):
         return np.sum(vol_grid.weights * q * vol_data["sqrt(g)"])
@@ -518,13 +519,10 @@ def compute_betap_li_shaf_integrals(eq):
     
     betai = 2*mu_0 * vol_int(vol_data["p"]) / B_P_v # poloidal beta, Hirshman eq 91
 
-    print(f"s3 = {0.5*(betai-lsubi-musubi+2*lsubR)}") # #S3/2, eq 14c
-    print(f"{lsubi=}")
+
     L_i =  vol_int(Bsq_P_vol) / mu_0/ lcfs_data["current"][-1]**2
     lsubi_current_normalized = 2*L_i / mu_0 /lcfs_data["R0"] # fro fusion wiki 
-    print(f"{lsubi_current_normalized=}")
-    print(f"{musubi=}")
-    print(f"{betai=}")
+
     
     # following Hirhsman 1993
     A = betai + lsubi + musubi # eq 11a
@@ -555,10 +553,45 @@ def compute_betap_li_shaf_integrals(eq):
     s1 = S1(Rlao)/2/flao
     s2 = S2(Rlao)/2/flao
     s3 = S3/2
+    print("#"*10)
+    print("DESC")
+    print("#"*10)
+    print(f"s3 = {0.5*(betai-lsubi-musubi+2*lsubR)}") # #S3/2, eq 14c
+    print(f"{lsubi=}")
+    print(f"{lsubi_current_normalized=}")
+    print(f"{musubi=}")
+    print(f"{betai=}")
     print(f's1 = S1/2 = {S1(1/one_over_RT)/2}  (RT) , {S1(Rgeo)/2/fgeo}  (RG?)  {S1(Rlao)/2/flao}  (RL)')
     print(f's2 = S2/2 = {S2(1/one_over_RT)/2}  (RT) , {S2(Rgeo)/2/fgeo} (RG?)  {S2(Rlao)/2/flao} (RL)')
 
+    # compute same defs as EFIT
+    circum = lcfs_data["perimeter(z)"][-1]
+    vol = lcfs_data["V"]
+    r_0 = lcfs_data["R0"] # TODO: this is actually vac center?? https://github.com/gafusion/OMFIT-source/blob/ebfff46939e1e8a56ff6add2fd617ccbf80eee1f/omfit/omfit_classes/fluxSurface.py#L1746
+    r_axis=r_0
+    ip = lcfs_data["current"][-1]
+    Bp2_vol = vol_int(Bsq_P_vol)
+    li_from_definition = Bp2_vol / vol / mu_0 / mu_0 / ip / ip * circum * circum
+    desc_li={
+        "li_from_definition": li_from_definition,
+        "li_(1)_TLUCE": li_from_definition / circum / circum * 2 * vol / r_0 * 1,#correction_factor, has to do w/ kappa
+        "li_(2)_TLUCE": li_from_definition / circum / circum * 2 * vol / r_axis,
+        "li_(3)_TLUCE": li_from_definition / circum / circum * 2 * vol / r_0,
+        "li_(1)_EFIT": circum * circum * Bp2_vol / (vol * mu_0 * mu_0 * ip * ip),
+        "li_(3)_IMAS": 2 * Bp2_vol / r_0 / ip / ip / mu_0 / mu_0,
+        }
 
+
+    if efit is not None:
+        print("#"*10)
+        print("EFIT")
+        print("#"*10)
+        for key in desc_li.keys():
+            line = f"{key}: DESC = {desc_li[key]:1.4f}"
+            efit_line = f"EFIT = {efit['fluxSurfaces']['info']['internal_inductance'][key]}"
+            print(f"{line}" + " "*len(line) + efit_line)
+
+        # print(f"EFIT li: {efit["fluxSurfaces"]['info']['internal_inductance']}")
     
     return {"betai":betai,
             "<beta_pol>_vol":vol_data["<beta_pol>_vol"],
