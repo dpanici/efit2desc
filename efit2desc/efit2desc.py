@@ -516,7 +516,7 @@ def compute_betap_li_shaf_integrals(eq,efit=None):
     lsubi = vol_int(Bsq_P_vol) / B_P_v # internal inductance li eqn 9c
     lsubR = vol_int(vol_data["B_R"]**2) / B_P_v # eq 9d
     lsubZ = vol_int(vol_data["B_Z"]**2) / B_P_v # eq 9d
-    
+
     betai = 2*mu_0 * vol_int(vol_data["p"]) / B_P_v # poloidal beta, Hirshman eq 91
 
 
@@ -563,6 +563,11 @@ def compute_betap_li_shaf_integrals(eq,efit=None):
     print(f"{betai=}")
     print(f's1 = S1/2 = {S1(1/one_over_RT)/2}  (RT) , {S1(Rgeo)/2/fgeo}  (RG?)  {S1(Rlao)/2/flao}  (RL)')
     print(f's2 = S2/2 = {S2(1/one_over_RT)/2}  (RT) , {S2(Rgeo)/2/fgeo} (RG?)  {S2(Rlao)/2/flao} (RL)')
+    print(f"DESC poloidal beta calc: {vol_data['<beta_pol>_vol']}")
+    #FIXME: does this actually work?
+    Bpave = (lcfs_data["current"][-1] * mu_0 / lcfs_data["perimeter(z)"][-1]) 
+    beta_p_with_efit_formula = vol_int(lcfs_data["p"][-1]/Bpave**2/2/mu_0/vol_data["V"])
+    print(f"DESC poloidal beta w/efit formula: {beta_p_with_efit_formula}")
 
     # compute same defs as EFIT
     circum = lcfs_data["perimeter(z)"][-1]
@@ -586,6 +591,7 @@ def compute_betap_li_shaf_integrals(eq,efit=None):
         print("#"*10)
         print("EFIT")
         print("#"*10)
+        print(f"EFIT Poloidal beta: {efit['fluxSurfaces']['avg']['beta_p'][-1]}")
         for key in desc_li.keys():
             line = f"{key}: DESC = {desc_li[key]:1.4f}"
             efit_line = f"EFIT = {efit['fluxSurfaces']['info']['internal_inductance'][key]}"
