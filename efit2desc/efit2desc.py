@@ -268,10 +268,11 @@ def convert_EFIT_to_DESC(
     efit_Psi = efit["AuxQuantities"]["PHI"]
 
     # get bdry
-    plt.figure()
-    for k in range(0, len(fluxsurf["flux"]))[::-10]:
-        plt.plot(fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"])
-    plt.axis("equal")
+    if plot:
+        plt.figure()
+        for k in range(0, len(fluxsurf["flux"]))[::-10]:
+            plt.plot(fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"])
+        plt.axis("equal")
 
     # choose the LCFS as the bdry
     # TODO: use spectral condensation (ideally when implemented in DESC) to choose a better angle
@@ -292,10 +293,11 @@ def convert_EFIT_to_DESC(
         M=20,
         N=0,
     )
-    plt.figure()
-    for k in range(0, len(fluxsurf["flux"]))[::-10]:
-        plt.plot(fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"])
-    plt.axis("equal")
+    if plot:
+        plt.figure()
+        for k in range(0, len(fluxsurf["flux"]))[::-10]:
+            plt.plot(fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"])
+        plt.axis("equal")
 
     # choose the LCFS as the bdry
     lastind = len(fluxsurf["flux"]) - 1
@@ -330,8 +332,9 @@ def convert_EFIT_to_DESC(
         N=0,
     )
     data_surf = surface.compute(["R", "Z"], grid=LinearGrid(M=50, rho=1.0))
-    plt.plot(data_surf["R"], data_surf["Z"], "k--")
-    plt.savefig(savefolder + "/" + f"initial_surfs_and_bdry_{efitfile}_{name}.png")
+    if plot:
+        plt.plot(data_surf["R"], data_surf["Z"], "k--")
+        plt.savefig(savefolder + "/" + f"initial_surfs_and_bdry_{efitfile}_{name}.png")
 
     efit_rho = efit["RHOVN"]
     # so if one were to integrate it over chi, we would get psi_T(chi)
