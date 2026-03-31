@@ -1,8 +1,12 @@
-from omfit_classes import omfit_eqdsk
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
-import os
+from scipy.constants import mu_0
 from scipy import integrate
+
+from omfit_classes import omfit_eqdsk
+
 from desc.profiles import SplineProfile, PowerSeriesProfile
 from desc.equilibrium import Equilibrium
 from desc.plotting import *
@@ -203,65 +207,74 @@ def convert_EFIT_to_DESC(
     savefolder=".",
     poloidal_angle="polar",
 ):
-    """Read the EFIT file and generate a solved DESC equilibrium, as well as return the OMFITgeqdsk class object.
+    """Read the EFIT file and generate a solved DESC equilibrium.
+
+    Also returns the OMFITgeqdsk class object.
 
     This function:
-    - Read the EFIT equilibrium information from the gfile using the ``omfit_eqdsk.OMFITgeqdsk`` class
-    - Use the ``omfit_eqdsk.OMFITgeqdsk.addAuxQuantities()`` and ``omfit_eqdsk.OMFITgeqdsk.addFluxSurfaces()`` functions to
-     populate the object with flux-surface quantities such as the flux surface geometries and the safety factor (q = 1/iota) and toroidal current density
-    - Find the last-closed-flux-surface based on the passed-in desired psiN_cutoff
-     and parametrize this surface with a Fourier series based off of a geometric poloidal angle
-    - integrates the q profile over the poloidal flux ``psi`` in order to get the toroidal flux ``psi_T(chi)``
-      and uses it to define the DESC radial variable ``rho = sqrt(psi_T/psi_T(bdry))``
-    - integrates the toroidal current density in order to the net toroidal current as a flux function
-      and shifts the toroidal current such that at the magnetic axis, there is zero net enclosed toroidal current
-    - fits the pressure, 1/q profile and the net toroidal current profiles as functions of ``rho``, with either a power series
-    or a spline, in order to form the necessary inputs for a DESC fixed-boundary Equilibrium.
-    - creates a DESC ``Equilibrium`` object using the LCFS, profiles, and net enclosed toroidal flux calculated from EFIT
-    - Optionally, solves this equilibrium in DESC using by default the grid ``QuadratureGrid(L=eq.L_grid, M=eq.M, N=0)``
-    - Optionally, plots the results against the EFIT profiles and the EFIT flux surfaces
-    - returns the DESC ``Equilibrium`` object as well as the ``omfit_eqdsk.OMFITgeqdsk`` object
 
-    NOTE: up-down asymmetry is assumed by default.
+    - Reads the EFIT equilibrium from the gfile using ``omfit_eqdsk.OMFITgeqdsk``.
+    - Calls ``addAuxQuantities()`` and ``addFluxSurfaces()`` to populate flux-surface
+      quantities (geometry, safety factor q = 1/iota, toroidal current density).
+    - Finds the LCFS at ``psiN_cutoff`` and parametrizes it with a Fourier series
+      using the chosen poloidal angle.
+    - Integrates the q profile over poloidal flux ``psi`` to obtain toroidal flux
+      ``psi_T(psi)`` and defines the DESC radial variable
+      ``rho = sqrt(psi_T / psi_T(bdry))``.
+    - Integrates the toroidal current density to get net enclosed toroidal current
+      as a flux function (zero at the magnetic axis by construction).
+    - Fits pressure, iota = 1/q, and current profiles as functions of ``rho``
+      using either a power series or spline.
+    - Constructs a DESC ``Equilibrium`` with the LCFS, profiles, and total
+      toroidal flux from EFIT.
+    - Optionally solves the equilibrium, plots results against EFIT, and saves
+      outputs to disk.
 
-    Paramters
-    ---------
+    NOTE: up-down asymmetry is assumed by default (``sym=False``).
 
-    efitfile: str,
-        Path to eqdsk file
-    current_or_iota: {"current", "iota"}
-        Whether to fix the iota or current profile
-    profile_type: {"power_series", "spline"},
-        What type of Profile to use for pressure and iota/current
-    L,M : int,
-        Radial/poloidal spectral resolution to use for DESC equilibrium
-    profile_L : int,
-        Radial resolution to use for the profile fits (if using a power series)
-    psiN_cutoff : int,
-        Which normalized poloidal flux to cut the EFIT equilibrium off at and consider as the LCFS for the DESC Equilibrium
-    solve : bool,
-        Whether or not to solve the DESC Equilibrium before returning. if False, will return an unsolved DESC Equilibrium object,
-        which will not be in equilibrium and will not have the correct interior flux surfaces.
+    Parameters
+    ----------
+    efitfile : str
+        Path to the eqdsk file.
+    current_or_iota : {"current", "iota"}
+        Whether to fix the current or iota profile in the DESC equilibrium.
+    profile_type : {"power_series", "spline"}
+        Profile type to use for pressure and iota/current.
+    L : int
+        Radial spectral resolution for the DESC equilibrium.
+    M : int
+        Poloidal spectral resolution for the DESC equilibrium.
+    profile_L : int
+        Radial order for power-series profile fits.
+    psiN_cutoff : float
+        Normalized poloidal flux value to treat as the LCFS.
+    solve : bool
+        If False, return the Equilibrium object without solving it. The
+        returned equilibrium will not satisfy force balance and will not have
+        correct interior flux surfaces.
     solve_options : dict, optional
-        Keyword arguments forwarded to ``eq.solve()``. Any key not provided defaults to:
-        ``ftol=1e-12``, ``gtol=1e-14``, ``xtol=1e-14``, ``maxiter=150``, ``verbose=3``,
-        ``objective=ObjectiveFunction(ForceBalance(eq, grid=QuadratureGrid(L=eq.L_grid, M=eq.M_grid, N=0)))``.
-    plot : bool,
-        Whether or not to create the plots showing the initial and final flux surfaces and profiles compared to EFIT.
-    save : bool,
-        Whether or not to save the Equilibrium and the plots (plots are saved only if ``plot=True``)
-    savefolder : str,
-        What folder to save the Equilibrium and figures to (if save=True)
-    poloidal angle : {"arclength", "polar"}
-        which poloidal angle to use when fitting the LCFS in DESC from EFIT.
-        Defaults to polar
+        Keyword arguments forwarded to ``eq.solve()``. Keys not present are
+        filled with defaults: ``ftol=1e-8``, ``gtol=0``, ``xtol=0``,
+        ``maxiter=100``, ``verbose=3``, ``objective=ObjectiveFunction(
+        ForceBalance(eq, grid=QuadratureGrid(L=eq.L_grid, M=eq.M_grid, N=0)))``.
+    plot : bool
+        Whether to produce comparison plots of flux surfaces and profiles
+        against EFIT.
+    save : bool
+        Whether to save the Equilibrium and figures (figures only if
+        ``plot=True``).
+    savefolder : str
+        Directory to write output files to.
+    poloidal_angle : {"arclength", "polar"}
+        Poloidal angle convention used when fitting the LCFS boundary.
 
     Returns
     -------
     eq : desc.equilibrium.Equilibrium
-        the DESC ``Equilibrium`` object.
+        The DESC ``Equilibrium`` object.
     efit : omfit_classes.omfit_eqdsk.OMFITgeqdsk
-        the ``OMFITgeqdsk`` object containing the read-in and post-processed EFIT data from the gfile.
+        The ``OMFITgeqdsk`` object with the read-in and post-processed EFIT
+        data from the gfile.
 
     """
     if solve_options is None:
@@ -271,7 +284,7 @@ def convert_EFIT_to_DESC(
         "polar",
     ], "poloidal_angle must be one of polar or arclength"
     efitname = os.path.basename(efitfile)
-    name = f"{current_or_iota}_{profile_type}_M_{M}_prof_L_{profile_L}_psimax_{psiN_cutoff}"  # _surfind_{fluxsurfind}"
+    name = f"{current_or_iota}_{profile_type}_M_{M}_prof_L_{profile_L}_psimax_{psiN_cutoff}"
     efit = read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff)
     fluxsurf = efit["fluxSurfaces"]
     # this is the toroidal flux enclosed by the bdry, as calc by EFIT
@@ -457,9 +470,6 @@ def convert_EFIT_to_DESC(
             )
 
     return eq, efit
-
-
-from scipy.constants import mu_0
 
 
 def compute_betap_li_shaf_integrals(eq, efit=None):
