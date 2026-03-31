@@ -1,6 +1,7 @@
 from omfit_classes import omfit_eqdsk
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 from scipy import integrate
 from desc.profiles import SplineProfile, PowerSeriesProfile
 from desc.equilibrium import Equilibrium
@@ -261,6 +262,7 @@ def convert_EFIT_to_DESC(
         "arclength",
         "polar",
     ], "poloidal_angle must be one of polar or arclength"
+    efitname = os.path.basename(efitfile)
     name = f"{current_or_iota}_{profile_type}_M_{M}_prof_L_{profile_L}_psimax_{psiN_cutoff}"  # _surfind_{fluxsurfind}"
     efit = read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff)
     fluxsurf = efit["fluxSurfaces"]
@@ -334,7 +336,7 @@ def convert_EFIT_to_DESC(
     data_surf = surface.compute(["R", "Z"], grid=LinearGrid(M=50, rho=1.0))
     if plot:
         plt.plot(data_surf["R"], data_surf["Z"], "k--")
-        plt.savefig(savefolder + "/" + f"initial_surfs_and_bdry_{efitfile}_{name}.png")
+        plt.savefig(savefolder + "/" + f"initial_surfs_and_bdry_{efitname}_{name}.png")
 
     efit_rho = efit["RHOVN"]
     # so if one were to integrate it over chi, we would get psi_T(chi)
@@ -407,25 +409,25 @@ def convert_EFIT_to_DESC(
             ),
         )
     if save:
-        eq.save(savefolder + "/" + f"DESC_eq_{efitfile}_{name}.h5")
+        eq.save(savefolder + "/" + f"DESC_eq_{efitname}_{name}.h5")
 
     if plot:
         plot_1d(eq, "iota", label="DESC", lw=3)
         plt.plot(efit_rho, efit_iota, "r--", label="EFIT", lw=3)
         plt.legend()
         if save:
-            plt.savefig(savefolder + "/" + f"iota_comp_{efitfile}_{name}.png")
+            plt.savefig(savefolder + "/" + f"iota_comp_{efitname}_{name}.png")
         plot_1d(eq, "p", label="DESC", lw=3)
         plt.plot(efit_rho, p, "r--", label="EFIT", lw=3)
         plt.legend()
         if save:
-            plt.savefig(savefolder + "/" + f"pressure_comp_{efitfile}_{name}.png")
+            plt.savefig(savefolder + "/" + f"pressure_comp_{efitname}_{name}.png")
 
         plot_1d(eq, "current", label="DESC", lw=3)
         plt.plot(efit_rho, current, "r--", label="EFIT", lw=3)
         plt.legend()
         if save:
-            plt.savefig(savefolder + "/" + f"current_comp_{efitfile}_{name}.png")
+            plt.savefig(savefolder + "/" + f"current_comp_{efitname}_{name}.png")
 
         plt.figure()
         inds = np.arange(len(fluxsurf["flux"]))[::-10]
@@ -454,14 +456,14 @@ def convert_EFIT_to_DESC(
         plt.legend()
         if save:
             plt.savefig(
-                savefolder + "/" + f"final_surfs_and_bdry_{efitfile}_{name}.png"
+                savefolder + "/" + f"final_surfs_and_bdry_{efitname}_{name}.png"
             )
         plot_surfaces(eq, figsize=(8, 8), rho_lw=3, rho=rho_to_plot)
         if save:
             plt.savefig(
                 savefolder
                 + "/"
-                + f"final_surfs_with_sfl_theta_and_bdry_{efitfile}_{name}.png"
+                + f"final_surfs_with_sfl_theta_and_bdry_{efitname}_{name}.png"
             )
 
     return eq, efit
@@ -611,9 +613,9 @@ def compute_betap_li_shaf_integrals(eq, efit=None):
     # compute same defs as EFIT
     circum = lcfs_data["perimeter(z)"][-1]
     vol = lcfs_data["V"]
-    r_0 = lcfs_data[
-        "R0"
-    ]  # TODO: this is actually vac center?? https://github.com/gafusion/OMFIT-source/blob/ebfff46939e1e8a56ff6add2fd617ccbf80eee1f/omfit/omfit_classes/fluxSurface.py#L1746
+    # TODO: this is actually vac center??
+    # https://github.com/gafusion/OMFIT-source/blob/ebfff46939e1e8a56ff6add2fd617ccbf80eee1f/omfit/omfit_classes/fluxSurface.py#L1746
+    r_0 = lcfs_data["R0"]
     r_axis = r_0
     ip = lcfs_data["current"][-1]
     Bp2_vol = vol_int(Bsq_P_vol)
