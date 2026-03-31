@@ -197,6 +197,7 @@ def convert_EFIT_to_DESC(
     profile_L=24,
     psiN_cutoff=0.99,
     solve=True,
+    solve_options=None,
     plot=True,
     save=True,
     savefolder=".",
@@ -240,7 +241,11 @@ def convert_EFIT_to_DESC(
         Which normalized poloidal flux to cut the EFIT equilibrium off at and consider as the LCFS for the DESC Equilibrium
     solve : bool,
         Whether or not to solve the DESC Equilibrium before returning. if False, will return an unsolved DESC Equilibrium object,
-         which will not be in equilibrium and will not have the correct interior flux surfaces.
+        which will not be in equilibrium and will not have the correct interior flux surfaces.
+    solve_options : dict, optional
+        Keyword arguments forwarded to ``eq.solve()``. Any key not provided defaults to:
+        ``ftol=1e-12``, ``gtol=1e-14``, ``xtol=1e-14``, ``maxiter=150``, ``verbose=3``,
+        ``objective=ObjectiveFunction(ForceBalance(eq, grid=QuadratureGrid(L=eq.L_grid, M=eq.M_grid, N=0)))``.
     plot : bool,
         Whether or not to create the plots showing the initial and final flux surfaces and profiles compared to EFIT.
     save : bool,
@@ -253,11 +258,14 @@ def convert_EFIT_to_DESC(
 
     Returns
     -------
-    eq : desc.equilibrium.Equilibrium, the DESC ``Equilibrium`` object.
-    efit : omfit_classes.omfit_eqdsk.OMFITgeqdsk, the ``OMFITgeqdsk`` object containing the read-in and post-processed EFIT data from the gfile.
-
+    eq : desc.equilibrium.Equilibrium
+        the DESC ``Equilibrium`` object.
+    efit : omfit_classes.omfit_eqdsk.OMFITgeqdsk
+        the ``OMFITgeqdsk`` object containing the read-in and post-processed EFIT data from the gfile.
 
     """
+    if solve_options is None:
+        solve_options = {}
     assert poloidal_angle in [
         "arclength",
         "polar",
@@ -285,37 +293,14 @@ def convert_EFIT_to_DESC(
     Zaxis = np.mean(fluxsurf["flux"][0]["Z"])
     x1 = Zbdry - Zaxis
     x2 = Rbdry - Raxis
-    thetas = np.arctan2(x1, x2)
-
-    surface = FourierRZToroidalSurface.from_values(
-        coords=np.vstack([Rbdry, np.zeros_like(Rbdry), Zbdry]).T,
-        theta=thetas,
-        sym=False,
-        NFP=1,
-        M=20,
-        N=0,
-    )
-    if plot:
-        plt.figure()
-        for k in range(0, len(fluxsurf["flux"]))[::-10]:
-            plt.plot(fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"])
-        plt.axis("equal")
-
-    # choose the LCFS as the bdry
-    lastind = len(fluxsurf["flux"]) - 1
-    Rbdry = fluxsurf["flux"][lastind]["R"]
-    Zbdry = fluxsurf["flux"][lastind]["Z"]
-    Raxis = np.mean(fluxsurf["flux"][0]["R"])
-    Zaxis = np.mean(fluxsurf["flux"][0]["Z"])
-    x1 = Zbdry - Zaxis
-    x2 = Rbdry - Raxis
     # use arclength as the angle
     if poloidal_angle == "arclength":
         arclengths = np.sqrt(
             (Rbdry[1:] - Rbdry[0:-1]) ** 2 + (Zbdry[1:] - Zbdry[0:-1]) ** 2
         )
         arclengths = np.append(
-            arclengths, (Rbdry[0] - Rbdry[-1]) ** 2 + (Zbdry[0] - Zbdry[-1]) ** 2
+            arclengths,
+            np.sqrt((Rbdry[0] - Rbdry[-1]) ** 2 + (Zbdry[0] - Zbdry[-1]) ** 2),
         )
         theta_norm_arclength = integrate.cumulative_trapezoid(y=arclengths, initial=0)
         theta_norm_arclength = (
@@ -335,6 +320,11 @@ def convert_EFIT_to_DESC(
     )
     data_surf = surface.compute(["R", "Z"], grid=LinearGrid(M=50, rho=1.0))
     if plot:
+        plt.figure()
+        for k in range(0, len(fluxsurf["flux"]))[::-10]:
+            plt.plot(fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"])
+        plt.axis("equal")
+    if plot:
         plt.plot(data_surf["R"], data_surf["Z"], "k--")
         plt.savefig(savefolder + "/" + f"initial_surfs_and_bdry_{efitname}_{name}.png")
 
@@ -349,19 +339,17 @@ def convert_EFIT_to_DESC(
     psi_T = np.insert(psi_T, 0, 0) * 2 * np.pi * -1  # need this factor apparently
     efit_rho = np.sqrt(abs(psi_T / np.max(abs(psi_T))))
 
+    # current[0] is always 0
     current = integrate.cumtrapz(
         fluxsurf["avg"]["dip/dpsi"], fluxsurf["geo"]["psi"], initial=0
     )
-    current_shifted = current - current[0]  # make current[0]=0 for spline fit
-    current_spline = SplineProfile(
-        knots=efit_rho, values=current_shifted, method="cubic2"
-    )
+    current_spline = SplineProfile(knots=efit_rho, values=current, method="cubic2")
     current_poly = PowerSeriesProfile.from_values(
         efit_rho, current, order=profile_L, sym="even"
     )
-    current_poly.params[0] = (
-        0.0  # make current[0]=0 for poly to enforce zero on-axis net toroidal current
-    )
+    # make current.params[0]=0 strictly to enforce zero on-axis net toroidal current
+    # can be nonzero due to small profile_L
+    current_poly.params[0] = 0.0
 
     p = fluxsurf["avg"]["P"]
     p_spline = SplineProfile(knots=efit_rho, values=p)
@@ -377,13 +365,13 @@ def convert_EFIT_to_DESC(
     # make axis initial guess from the Raxis, Zaxis earlier
     axis = FourierRZCurve(R_n=Raxis, Z_n=Zaxis, sym=False, modes_R=[0], modes_Z=[0])
 
-    iprof = i_poly if profile_type == "power_series" else i_spline
-    iprof = None if current_or_iota == "current" else iprof
-
-    currprof = current_poly if profile_type == "power_series" else current_spline
-    currprof = None if current_or_iota == "iota" else currprof
-
     pprof = p_poly if profile_type == "power_series" else p_spline
+    iprof = i_poly if profile_type == "power_series" else i_spline
+    currprof = current_poly if profile_type == "power_series" else current_spline
+
+    # assign only choosen profile
+    iprof = None if current_or_iota == "current" else iprof
+    currprof = None if current_or_iota == "iota" else currprof
 
     efit_Psi = psi_T[-1]
     eq = Equilibrium(
@@ -398,16 +386,18 @@ def convert_EFIT_to_DESC(
         L=L,
     )
     if solve:
-        eq.solve(
-            ftol=1e-12,
-            maxiter=150,
-            gtol=0,
-            verbose=3,
-            xtol=0,
-            objective=ObjectiveFunction(
+        solve_options.setdefault("ftol", 1e-8)
+        solve_options.setdefault("gtol", 0)
+        solve_options.setdefault("xtol", 0)
+        solve_options.setdefault("maxiter", 100)
+        solve_options.setdefault("verbose", 3)
+        solve_options.setdefault(
+            "objective",
+            ObjectiveFunction(
                 ForceBalance(eq, grid=QuadratureGrid(L=eq.L_grid, M=eq.M_grid, N=0))
             ),
         )
+        eq.solve(**solve_options)
     if save:
         eq.save(savefolder + "/" + f"DESC_eq_{efitname}_{name}.h5")
 
