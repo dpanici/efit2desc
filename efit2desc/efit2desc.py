@@ -24,9 +24,6 @@ def read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff=1.0):
     efit.addAuxQuantities()
     efit.addFluxSurfaces(levels=list(np.linspace(0, psiN_cutoff, 129)))
     fluxsurf = efit["fluxSurfaces"]
-    Jt = efit["AuxQuantities"]["Jt"]
-    # this is the toroidal flux enclosed by the bdry, as calc by EFIT
-    efit_Psi = efit["AuxQuantities"]["PHI"]  # [fluxsurfind]
     # this method obtains the iota, etc on the flux surfaces
     fluxsurf.surfAvg()
     return efit
@@ -153,23 +150,30 @@ def plot_eq_iota_against_efit(
     fluxsurf = efit["fluxSurfaces"]
     # this is the toroidal flux enclosed by the bdry, as calc by EFIT
 
-    efit_rho = efit["RHOVN"]
-    # so if one were to integrate it over chi, we would get psi_T(chi)
-
+    # Compute rho = sqrt(Phi_tor / Phi_tor_LCFS) on the flux surface grid.
+    #
+    # We do NOT use efit["RHOVN"] here even though it is the same quantity in
+    # principle, for two reasons:
+    #   1. RHOVN lives on the gfile 1D psiN grid (0→1, NPTS points) and is
+    #      computed from the 1D QPSI profile.  The flux surface profiles
+    #      (fluxsurf["avg"]["q/p/dip...]) live on the flux surface grid
+    #      (0→psiN_cutoff, 129 points, from 2D field-line tracing).  Knots and
+    #      values must be on the same grid when building the SplineProfile /
+    #      PowerSeriesProfile objects below.
+    #   2. RHOVN is normalised to 1 at psiN=1 (the true separatrix).  Our LCFS
+    #      is at psiN_cutoff, so RHOVN at that surface is slightly < 1 and the
+    #      profiles would not span rho=[0,1] as DESC requires.
+    #
+    # By integrating q from the same flux surface grid we get rho values that
+    # are on the same 129-point grid as the profiles and are normalised to
+    # exactly 1 at the chosen LCFS.
     psi_T = integrate.cumtrapz(
         fluxsurf["avg"]["q"],
         abs(fluxsurf["geo"]["psi"] - np.max(fluxsurf["geo"]["psi"])),
     )
 
-    psi_T = np.insert(psi_T, 0, 0) * 2 * np.pi * -1  # need this factor apparently
-    efit_rho = np.sqrt(abs(psi_T / np.max(abs(psi_T))))
-
-    current = integrate.cumtrapz(
-        fluxsurf["avg"]["dip/dpsi"], fluxsurf["geo"]["psi"], initial=0
-    )
-    current_shifted = current - current[0]  # make current[0]=0 for spline fit
-
-    efit_iota = 1 / fluxsurf["avg"]["q"]
+    psi_T = np.insert(psi_T, 0, 0)
+    efit_rho = np.sqrt(psi_T / psi_T[-1])
 
     fig, ax = plt.subplots(dpi=1000)
 
@@ -287,8 +291,10 @@ def convert_EFIT_to_DESC(
     name = f"{current_or_iota}_{profile_type}_M_{M}_prof_L_{profile_L}_psimax_{psiN_cutoff}"
     efit = read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff)
     fluxsurf = efit["fluxSurfaces"]
-    # this is the toroidal flux enclosed by the bdry, as calc by EFIT
-    efit_Psi = efit["AuxQuantities"]["PHI"]
+    print(efit.keys())
+    print(efit["_desc"].keys())
+    print(efit["_desc"])
+    print(fluxsurf.keys())
 
     # get bdry
     if plot:
@@ -341,16 +347,21 @@ def convert_EFIT_to_DESC(
         plt.plot(data_surf["R"], data_surf["Z"], "k--")
         plt.savefig(savefolder + "/" + f"initial_surfs_and_bdry_{efitname}_{name}.png")
 
-    efit_rho = efit["RHOVN"]
-    # so if one were to integrate it over chi, we would get psi_T(chi)
-
+    # Compute rho = sqrt(Phi_tor / Phi_tor_LCFS) on the flux surface grid.
+    # See comment in plot_eq_iota_against_efit for why RHOVN is not used here.
+    # Additional reason specific to convert_EFIT_to_DESC: efit_Psi is derived
+    # from psi_T[-1] (see below), so using the same psi_T for both rho and Psi
+    # keeps the two consistent with each other and with the LCFS choice.
     psi_T = integrate.cumtrapz(
         fluxsurf["avg"]["q"],
         abs(fluxsurf["geo"]["psi"] - np.max(fluxsurf["geo"]["psi"])),
     )
 
-    psi_T = np.insert(psi_T, 0, 0) * 2 * np.pi * -1  # need this factor apparently
-    efit_rho = np.sqrt(abs(psi_T / np.max(abs(psi_T))))
+    # flux surfaces run psiN=0 (axis) → psiN_cutoff (boundary), so
+    # abs(psi - max(psi)) is monotonically increasing axis→boundary,
+    # making psi_T strictly non-negative — no sign or 2π correction needed.
+    psi_T = np.insert(psi_T, 0, 0)
+    efit_rho = np.sqrt(psi_T / psi_T[-1])
 
     # current[0] is always 0
     current = integrate.cumtrapz(
@@ -386,7 +397,28 @@ def convert_EFIT_to_DESC(
     iprof = None if current_or_iota == "current" else iprof
     currprof = None if current_or_iota == "iota" else currprof
 
-    efit_Psi = psi_T[-1]
+    # psi_T[-1] = ∫ q d|ψ| where ψ = Ψ_pol/(2π) is in Wb/rad (gfile convention).
+    # Therefore psi_T[-1] = |φ_tor| = |Φ_tor|/(2π) = |DESC's psi (lowercase)|.
+    # DESC's Psi (uppercase) = Φ_tor in Webers = 2π * psi_T[-1] * sign.
+    #
+    # psi_T is always positive (abs() forces integration variable to increase
+    # axis→boundary regardless of EFIT's ψ sign convention), so the sign of
+    # Φ_tor must come from EFIT's own PHI array (reflects actual B_tor direction).
+    #
+    # We use psi_T for magnitude rather than PHI directly because psi_T is
+    # computed from the same 2D flux surfaces used to define the LCFS, making
+    # the two internally consistent.  OMFIT's PHI uses the 1D QPSI gfile profile
+    # which can differ from the 2D surface-averaged q.
+    _phi_sign = float(
+        np.sign(
+            np.interp(
+                psiN_cutoff,
+                np.linspace(0, 1, len(efit["AuxQuantities"]["PHI"])),
+                efit["AuxQuantities"]["PHI"],
+            )
+        )
+    )
+    efit_Psi = _phi_sign * 2 * np.pi * psi_T[-1]
     eq = Equilibrium(
         surface=surface,
         axis=axis,
