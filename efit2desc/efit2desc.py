@@ -7,36 +7,30 @@ from scipy import integrate
 
 from omfit_classes import omfit_eqdsk
 
-from desc.profiles import SplineProfile, PowerSeriesProfile
+from desc.profiles import PowerSeriesProfile, SplineProfile
 from desc.equilibrium import Equilibrium
 from desc.plotting import *
-from desc.grid import QuadratureGrid
+from desc.grid import LinearGrid, QuadratureGrid
 from desc.objectives import ForceBalance, ObjectiveFunction
-from desc.geometry import FourierRZToroidalSurface, FourierRZCurve
-from desc.grid import LinearGrid
+from desc.geometry import FourierRZCurve, FourierRZToroidalSurface
 
 
 def read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff=1.0):
-
     efit = omfit_eqdsk.OMFITgeqdsk(efitfile)
-    # run the methods of the OMFITgeqdsk class to get
-    # aux and flux surface quantities for the EFIT
+    # populate aux and flux-surface quantities
     efit.addAuxQuantities()
     efit.addFluxSurfaces(levels=list(np.linspace(0, psiN_cutoff, 129)))
-    fluxsurf = efit["fluxSurfaces"]
-    # this method obtains the iota, etc on the flux surfaces
-    fluxsurf.surfAvg()
+    # surfAvg computes safety factor, pressure, etc. on each flux surface
+    efit["fluxSurfaces"].surfAvg()
     return efit
 
 
 def plot_eq_surfaces_against_efit(efitfile, desc_eq, levels=20):
-
     efit = read_EFIT_and_get_fluxsurfs(efitfile, 1.0)
     fluxsurf = efit["fluxSurfaces"]
 
     inds = np.arange(len(fluxsurf["flux"]))[::-10]
-    efit_rho = efit["RHOVN"]
-    rho_to_plot = efit_rho[inds]
+    rho_to_plot = efit["RHOVN"][inds]
     fig, ax = plot_surfaces(
         desc_eq,
         figsize=(8, 8),
@@ -46,23 +40,15 @@ def plot_eq_surfaces_against_efit(efitfile, desc_eq, levels=20):
     )
     is_labelled = False
     for k in inds:
-        if not is_labelled:
-            plt.plot(
-                fluxsurf["flux"][k]["R"],
-                fluxsurf["flux"][k]["Z"],
-                "k--",
-                label="EFIT",
-                lw=3,
-            )
-            is_labelled = True
-        else:
-            plt.plot(
-                fluxsurf["flux"][k]["R"],
-                fluxsurf["flux"][k]["Z"],
-                "k--",
-                lw=3,
-                label="EFIT",
-            )
+        label = "EFIT" if not is_labelled else None
+        plt.plot(
+            fluxsurf["flux"][k]["R"],
+            fluxsurf["flux"][k]["Z"],
+            "k--",
+            lw=3,
+            label=label,
+        )
+        is_labelled = True
     # also want to add a couple contours outside
     plt.contour(
         efit["AuxQuantities"]["R"],
@@ -72,17 +58,12 @@ def plot_eq_surfaces_against_efit(efitfile, desc_eq, levels=20):
         linewidths=[3],
         linestyles=["--"],
     )
-    # plt.colorbar()
     plt.axis("equal")
-    plt.axis("equal")
-    # plt.scatter(Raxis, Zaxis, marker="x", label="EFIT axis", c="k")
-    # desc_axis = desc_eq.axis.compute(["R", "Z"])
-    # plt.scatter(desc_axis["R"][0], desc_axis["Z"][0], label="DESC Axis")
     plt.legend()
     return fig, ax
 
 
-### taken from vmeclauncher.py truncateEFIT.py by Wingen ###
+# taken from vmeclauncher.py truncateEFIT.py by Wingen
 # find psi with q(psi) = m/n for all m in [n*qmin, n*qmax]
 def scan_q(q, n=3):
     rhos = np.linspace(0, 1.0, 1000)
@@ -96,18 +77,12 @@ def scan_q(q, n=3):
 
     for m in range(int(n * qmin) + 1, N):
         psi = bisec(lambda x: q(x) - float(m) / n, a=0, b=1)
-        # print (m, psi, q(psi))
         psia.append(psi)
         qa.append(q(psi))
 
-    # m = int(n * qmax) - 1
-    # qbest = (m + 0.2) / n
-    # psi = bisec(lambda x: q(x) - qbest, a=0, b=1)
-
-    return psia, qa  # , psi
+    return psia, qa
 
 
-# ----------------------------------------------------------------------------------------
 # find root through bisection
 def bisec(funct, a=0, b=1.5):
     eps = 1e-14
@@ -133,9 +108,6 @@ def bisec(funct, a=0, b=1.5):
     return x
 
 
-################################
-
-
 def plot_eq_iota_against_efit(
     efitfile,
     desc_eq,
@@ -145,10 +117,8 @@ def plot_eq_iota_against_efit(
     max_n=6,
     method="cubic",
 ):
-
     efit = read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff)
     fluxsurf = efit["fluxSurfaces"]
-    # this is the toroidal flux enclosed by the bdry, as calc by EFIT
 
     # Compute rho = sqrt(Phi_tor / Phi_tor_LCFS) on the flux surface grid.
     #
@@ -171,7 +141,6 @@ def plot_eq_iota_against_efit(
         fluxsurf["avg"]["q"],
         abs(fluxsurf["geo"]["psi"] - np.max(fluxsurf["geo"]["psi"])),
     )
-
     psi_T = np.insert(psi_T, 0, 0)
     efit_rho = np.sqrt(psi_T / psi_T[-1])
 
@@ -179,7 +148,7 @@ def plot_eq_iota_against_efit(
 
     if show_rationals:
         qprof = SplineProfile(
-            knots=abs(psi_T / np.max(abs(psi_T))),
+            knots=efit_rho,
             values=np.abs(fluxsurf["avg"]["q"]),
             method=method,
         )
@@ -288,20 +257,12 @@ def convert_EFIT_to_DESC(
         "polar",
     ], "poloidal_angle must be one of polar or arclength"
     efitname = os.path.basename(efitfile)
-    name = f"{current_or_iota}_{profile_type}_M_{M}_prof_L_{profile_L}_psimax_{psiN_cutoff}"
+    name = (
+        f"{current_or_iota}_{profile_type}_M_{M}"
+        f"_prof_L_{profile_L}_psimax_{psiN_cutoff}"
+    )
     efit = read_EFIT_and_get_fluxsurfs(efitfile, psiN_cutoff)
     fluxsurf = efit["fluxSurfaces"]
-    print(efit.keys())
-    print(efit["_desc"].keys())
-    print(efit["_desc"])
-    print(fluxsurf.keys())
-
-    # get bdry
-    if plot:
-        plt.figure()
-        for k in range(0, len(fluxsurf["flux"]))[::-10]:
-            plt.plot(fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"])
-        plt.axis("equal")
 
     # choose the LCFS as the bdry
     # TODO: use spectral condensation (ideally when implemented in DESC) to choose a better angle
@@ -312,7 +273,7 @@ def convert_EFIT_to_DESC(
     Zaxis = np.mean(fluxsurf["flux"][0]["Z"])
     x1 = Zbdry - Zaxis
     x2 = Rbdry - Raxis
-    # use arclength as the angle
+
     if poloidal_angle == "arclength":
         arclengths = np.sqrt(
             (Rbdry[1:] - Rbdry[0:-1]) ** 2 + (Zbdry[1:] - Zbdry[0:-1]) ** 2
@@ -322,10 +283,7 @@ def convert_EFIT_to_DESC(
             np.sqrt((Rbdry[0] - Rbdry[-1]) ** 2 + (Zbdry[0] - Zbdry[-1]) ** 2),
         )
         theta_norm_arclength = integrate.cumulative_trapezoid(y=arclengths, initial=0)
-        theta_norm_arclength = (
-            theta_norm_arclength / np.max(theta_norm_arclength) * 2 * np.pi
-        )
-        thetas = theta_norm_arclength
+        thetas = theta_norm_arclength / np.max(theta_norm_arclength) * 2 * np.pi
     elif poloidal_angle == "polar":
         thetas = np.arctan2(x1, x2)
 
@@ -337,13 +295,12 @@ def convert_EFIT_to_DESC(
         M=20,
         N=0,
     )
-    data_surf = surface.compute(["R", "Z"], grid=LinearGrid(M=50, rho=1.0))
     if plot:
+        data_surf = surface.compute(["R", "Z"], grid=LinearGrid(M=50, rho=1.0))
         plt.figure()
         for k in range(0, len(fluxsurf["flux"]))[::-10]:
             plt.plot(fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"])
         plt.axis("equal")
-    if plot:
         plt.plot(data_surf["R"], data_surf["Z"], "k--")
         plt.savefig(savefolder + "/" + f"initial_surfs_and_bdry_{efitname}_{name}.png")
 
@@ -356,14 +313,13 @@ def convert_EFIT_to_DESC(
         fluxsurf["avg"]["q"],
         abs(fluxsurf["geo"]["psi"] - np.max(fluxsurf["geo"]["psi"])),
     )
-
     # flux surfaces run psiN=0 (axis) → psiN_cutoff (boundary), so
     # abs(psi - max(psi)) is monotonically increasing axis→boundary,
     # making psi_T strictly non-negative — no sign or 2π correction needed.
     psi_T = np.insert(psi_T, 0, 0)
     efit_rho = np.sqrt(psi_T / psi_T[-1])
 
-    # current[0] is always 0
+    # current[0] is always 0 (cumtrapz initial=0)
     current = integrate.cumtrapz(
         fluxsurf["avg"]["dip/dpsi"], fluxsurf["geo"]["psi"], initial=0
     )
@@ -371,8 +327,7 @@ def convert_EFIT_to_DESC(
     current_poly = PowerSeriesProfile.from_values(
         efit_rho, current, order=profile_L, sym="even"
     )
-    # make current.params[0]=0 strictly to enforce zero on-axis net toroidal current
-    # can be nonzero due to small profile_L
+    # enforce zero on-axis net toroidal current (can be nonzero due to finite profile_L)
     current_poly.params[0] = 0.0
 
     p = fluxsurf["avg"]["P"]
@@ -380,20 +335,18 @@ def convert_EFIT_to_DESC(
     p_poly = PowerSeriesProfile.from_values(efit_rho, p, order=profile_L, sym="even")
 
     efit_iota = 1 / fluxsurf["avg"]["q"]
-
     i_spline = SplineProfile(knots=efit_rho, values=efit_iota)
     i_poly = PowerSeriesProfile.from_values(
         efit_rho, efit_iota, order=profile_L, sym="even"
     )
 
-    # make axis initial guess from the Raxis, Zaxis earlier
     axis = FourierRZCurve(R_n=Raxis, Z_n=Zaxis, sym=False, modes_R=[0], modes_Z=[0])
 
     pprof = p_poly if profile_type == "power_series" else p_spline
     iprof = i_poly if profile_type == "power_series" else i_spline
     currprof = current_poly if profile_type == "power_series" else current_spline
 
-    # assign only choosen profile
+    # assign only the chosen profile type
     iprof = None if current_or_iota == "current" else iprof
     currprof = None if current_or_iota == "iota" else currprof
 
@@ -419,6 +372,7 @@ def convert_EFIT_to_DESC(
         )
     )
     efit_Psi = _phi_sign * 2 * np.pi * psi_T[-1]
+
     eq = Equilibrium(
         surface=surface,
         axis=axis,
@@ -452,6 +406,7 @@ def convert_EFIT_to_DESC(
         plt.legend()
         if save:
             plt.savefig(savefolder + "/" + f"iota_comp_{efitname}_{name}.png")
+
         plot_1d(eq, "p", label="DESC", lw=3)
         plt.plot(efit_rho, p, "r--", label="EFIT", lw=3)
         plt.legend()
@@ -464,26 +419,22 @@ def convert_EFIT_to_DESC(
         if save:
             plt.savefig(savefolder + "/" + f"current_comp_{efitname}_{name}.png")
 
-        plt.figure()
         inds = np.arange(len(fluxsurf["flux"]))[::-10]
         rho_to_plot = efit_rho[inds]
+
+        plt.figure()
         plot_surfaces(eq, figsize=(8, 8), theta=0, rho_lw=3, rho=rho_to_plot)
         is_labelled = False
         for k in inds:
-            if not is_labelled:
-                plt.plot(
-                    fluxsurf["flux"][k]["R"],
-                    fluxsurf["flux"][k]["Z"],
-                    "k--",
-                    label="EFIT",
-                    lw=3,
-                )
-                is_labelled = True
-            else:
-                plt.plot(
-                    fluxsurf["flux"][k]["R"], fluxsurf["flux"][k]["Z"], "k--", lw=3
-                )
-
+            label = "EFIT" if not is_labelled else None
+            plt.plot(
+                fluxsurf["flux"][k]["R"],
+                fluxsurf["flux"][k]["Z"],
+                "k--",
+                lw=3,
+                label=label,
+            )
+            is_labelled = True
         plt.axis("equal")
         plt.scatter(Raxis, Zaxis, marker="x", label="EFIT axis", c="k")
         desc_axis = eq.axis.compute(["R", "Z"])
@@ -493,6 +444,7 @@ def convert_EFIT_to_DESC(
             plt.savefig(
                 savefolder + "/" + f"final_surfs_and_bdry_{efitname}_{name}.png"
             )
+
         plot_surfaces(eq, figsize=(8, 8), rho_lw=3, rho=rho_to_plot)
         if save:
             plt.savefig(
@@ -524,10 +476,19 @@ def compute_betap_li_shaf_integrals(eq, efit=None):
     _type_
         _description_
     """
-
     vol_grid = QuadratureGrid(L=eq.L_grid, M=eq.M_grid, N=eq.N, NFP=eq.NFP)
     vol_data = eq.compute(
-        ["p", "B_theta", "sqrt(g)", "B_R", "B_Z", "V", "B_phi", "R", "<beta_pol>_vol"],
+        [
+            "p",
+            "B_theta",
+            "sqrt(g)",
+            "B_R",
+            "B_Z",
+            "V",
+            "B_phi",
+            "R",
+            "<beta_pol>_vol",
+        ],
         grid=vol_grid,
     )
 
@@ -552,18 +513,15 @@ def compute_betap_li_shaf_integrals(eq, efit=None):
         grid=lcfs_grid,
     )
 
-    def vol_int(q):  # , grid,vol_data):
+    def vol_int(q):
         return np.sum(vol_grid.weights * q * vol_data["sqrt(g)"])
-        # return np.sum(grid.weights * q )
 
-    def lcfs_int(q):  # ,grid, lcfs_data): # <q>_V from Hirshman 1993 paper def eq 8
+    def lcfs_int(q):  # <q>_V from Hirshman 1993 paper def eq 8
         return (
             np.sum(lcfs_grid.weights * q * lcfs_data["|e_theta x e_zeta|"])
             * lcfs_data["V"]
             / lcfs_data["S"]
         )
-        # return np.sum(grid.weights * q ) * lcfs_data["R0"] * 2 * np.pi
-        # return np.sum(grid.weights * q ) * lcfs_data["V"]/lcfs_data["A"]
 
     Bsq_P_lcfs = lcfs_data["B_R"] ** 2 + lcfs_data["B_Z"] ** 2
     Bsq_P_vol = vol_data["B_R"] ** 2 + vol_data["B_Z"] ** 2
@@ -599,12 +557,10 @@ def compute_betap_li_shaf_integrals(eq, efit=None):
     sig_hat_R_alpha_1 = A * one_over_RT  # eq 10a but with alpha=1
 
     def S1(R_star):  # eq 14a
-        return (
-            sig_hat_R + sig_hat_Z - R_star * sig_hat_R_alpha_1
-        )  # this last one should be assuming alpha=1...
+        return sig_hat_R + sig_hat_Z - R_star * sig_hat_R_alpha_1
 
     def S2(R_star):  # eq 14b
-        return R_star * sig_hat_R_alpha_1  # this last one should be assuming alpha=1...
+        return R_star * sig_hat_R_alpha_1
 
     S3 = C  # = sig_hat_Z(Z) eq 14c
 
@@ -616,23 +572,26 @@ def compute_betap_li_shaf_integrals(eq, efit=None):
     flao = Rshaf / Rlao
 
     # shafranov integrals for different choices of Rstar
-    # for some reason, hirshman multiplies the RG and RL by fgeo=Rshaf/Rgeo and flao=Rshaf/Rgeo... dont ask me why
+    # for some reason, hirshman multiplies the RG and RL by fgeo=Rshaf/Rgeo and
+    # flao=Rshaf/Rgeo... dont ask me why
     s1 = S1(Rlao) / 2 / flao
     s2 = S2(Rlao) / 2 / flao
     s3 = S3 / 2
     print("#" * 10)
     print("DESC")
     print("#" * 10)
-    print(f"s3 = {0.5*(betai-lsubi-musubi+2*lsubR)}")  # #S3/2, eq 14c
+    print(f"s3 = {0.5*(betai-lsubi-musubi+2*lsubR)}")  # S3/2, eq 14c
     print(f"{lsubi=}")
     print(f"{lsubi_current_normalized=}")
     print(f"{musubi=}")
     print(f"{betai=}")
     print(
-        f"s1 = S1/2 = {S1(1/one_over_RT)/2}  (RT) , {S1(Rgeo)/2/fgeo}  (RG?)  {S1(Rlao)/2/flao}  (RL)"
+        f"s1 = S1/2 = {S1(1/one_over_RT)/2}  (RT) , "
+        f"{S1(Rgeo)/2/fgeo}  (RG?)  {S1(Rlao)/2/flao}  (RL)"
     )
     print(
-        f"s2 = S2/2 = {S2(1/one_over_RT)/2}  (RT) , {S2(Rgeo)/2/fgeo} (RG?)  {S2(Rlao)/2/flao} (RL)"
+        f"s2 = S2/2 = {S2(1/one_over_RT)/2}  (RT) , "
+        f"{S2(Rgeo)/2/fgeo} (RG?)  {S2(Rlao)/2/flao} (RL)"
     )
     print(f"DESC poloidal beta calc: {vol_data['<beta_pol>_vol']}")
     # FIXME: does this actually work?
@@ -678,8 +637,6 @@ def compute_betap_li_shaf_integrals(eq, efit=None):
                 f"EFIT = {efit['fluxSurfaces']['info']['internal_inductance'][key]}"
             )
             print(f"{line}" + " " * len(line) + efit_line)
-
-        # print(f"EFIT li: {efit["fluxSurfaces"]['info']['internal_inductance']}")
 
     return {
         "betai": betai,
