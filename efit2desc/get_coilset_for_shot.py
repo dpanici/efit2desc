@@ -1,22 +1,11 @@
-from scipy.interpolate import interp1d
-from scipy.constants import mu_0
-from desc.coils import MixedCoilSet, CoilSet, FourierRZCoil, SplineXYZCoil
-from desc.magnetic_fields import ToroidalMagneticField, SplineMagneticField
-from desc.utils import dot
-import numpy as np
-from desc.io import load
-import io
-import jax
-import matplotlib.pyplot as plt
 import warnings
 
-### Get coil currents from ptdata ###
-try:
-    from ptdata import fetch_ptdata, PtDataFetcher
-except Exception as e:
-    print("could not import ptdata, got exception")
-    print(e)
-from matplotlib.backends.backend_pdf import PdfPages
+import numpy as np
+from scipy.interpolate import interp1d
+from scipy.constants import mu_0
+
+from desc.coils import MixedCoilSet
+from desc.magnetic_fields import SplineMagneticField, ToroidalMagneticField
 
 
 def get_coilset_for_shot(
@@ -48,6 +37,9 @@ def get_coilset_for_shot(
         whether to use an idealized toroidal field for the TF coilset, in which case the
         BCOIL coil current will be set to zero.
         False by default.
+    base_coils_file : str, optional
+        Path to the base coils file. If None, defaults to
+        ``"coils.d3d_efbic_kp48_from_andreas"``.
 
     Returns
     -------
@@ -83,7 +75,7 @@ def get_coilset_for_shot(
         ptnames.append(f"IL{ang}")
 
     def update_F_coils(t, coils, interpolable_ptnames):
-        # first 18 coils in Andreas' arrays is are the Fcoils
+        # first 18 coils in Andreas' arrays are the Fcoils
         Fturns = np.array(
             [
                 58,
@@ -108,8 +100,8 @@ def get_coilset_for_shot(
         )
         for i in range(18):
             assert "f" in coils[i].name
-            total_curr = interpolable_ptnames[coils[i].name[2:].upper().strip()](t)
-            current = total_curr  # the current measured is per turn, and they actually have the number of turns given by Fturns
+            # current is per-turn; number of turns per coil is given by Fturns
+            current = interpolable_ptnames[coils[i].name[2:].upper().strip()](t)
             for j in range(len(coils[i])):
                 coils[i][j].current = current * np.sign(coils[i][j].current)
 
@@ -148,17 +140,13 @@ def get_coilset_for_shot(
     CCoil199 ,  ind = 35
     """
 
-    import re
-
     nums = [str(i) for i in range(10)]
 
     def update_C_coils(t, coils, interpolable_ptnames):
         for i in range(3):
             ind = i + 33
-
-            for coil in coils[
-                ind
-            ]:  # go into the coilset so can set correct currents per coil
+            # go into the coilset so we can set correct currents per coil
+            for coil in coils[ind]:
                 angle_str = ""
                 for c in coil.name[2:]:
                     angle_str += c if c in nums else ""
@@ -194,18 +182,20 @@ def get_coilset_for_shot(
         # iL coils are total_coils[27:32]
         update_IL_coils(t, total_coils, interpolable_ptnames)
 
-    # coilsfile I got from Andreas Wingen
-    coilset_name = base_coils_file  # "coils.d3d_efbic_kp48_from_andreas"
-
     # get interp1d representations of the currents
     interpolable_ptnames = {}
-    PCS_SYS_D3 = ":/fusion/projects/codes/pcs/data/ptdata:/fusion/projects/codes/pcs/data/ptdata/uncomp:"
+    PCS_SYS_D3 = (
+        ":/fusion/projects/codes/pcs/data/ptdata"
+        ":/fusion/projects/codes/pcs/data/ptdata/uncomp:"
+    )
+    # get coil currents from ptdata
+    try:
+        from ptdata import fetch_ptdata, PtDataFetcher
+    except Exception as e:
+        print(f"could not import ptdata, got exception: {e}")
     for ptname in ptnames:
-        # print(ptname)
         try:
             fetcher = PtDataFetcher(ptname, round(shot), sys_d3=PCS_SYS_D3)
-
-            header = fetcher.header
             results = fetcher.fetch()
             interpolable_ptnames[ptname] = interp1d(
                 x=results["times"], y=results["data"], kind=interp_method
@@ -223,7 +213,8 @@ def get_coilset_for_shot(
         else:
             rename_coils = False
             warnings.warn(
-                "Make sure the coilset you load has the correct coil names", UserWarning
+                "Make sure the coilset you load has the correct coil names",
+                UserWarning,
             )
 
         coilset_name = base_coils_file
@@ -232,11 +223,8 @@ def get_coilset_for_shot(
         )
 
         if rename_coils:
-            # I rename his C coils as he has it setup so
-            # 79 and 259 are in the same group
-            # 139 and 319
-            # 199 and 19
-            # but we want to have them named acc. to what they individually are
+            # rename C coils: Andreas groups 79+259, 139+319, 199+19 together,
+            # but we want them named individually
             full_nominal_coils[33][1].name = "34 CCoil259"
             full_nominal_coils[34][1].name = "35 CCoil319"
             full_nominal_coils[35][1].name = "36 CCoil19"
@@ -281,7 +269,7 @@ def get_coilset_for_shot(
   EXTCUR(34) =  1.0540000E+03  EXTCUR(35) = -1.4100000E+02
   EXTCUR(36) = -1.2510000E+03
 
-  
+
 !----- Final comments ---------------------------------------------------
 ! mapcode boundary fraction is 0.9936
 ! file input.d3d.166439.04400_lcfs9936_fixed_ns97 generated by
